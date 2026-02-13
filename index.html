@@ -443,6 +443,415 @@
                   <div class="prod-card" style="border-left: 3px solid ${DAY_COLOR[comp.prepDay]}">
                     <div class="prod-card-head">
                       <strong>${escHtml(comp.name)}</strong>
+                      <span class="temp-badge ${comp.warm ? 'warm' : 'kalt'}">${comp.war      d2: { name: "Graved Lax",     sort: 1 },
+      d3: { name: "Garnelenpfanne", sort: 2 },
+    },
+    components: {
+      c1:  { dishId: "d1", name: "Braten",          ownerName: "Thomas", prepDay: "Do", sort: 0 },
+      c2:  { dishId: "d1", name: "Remoulade",        ownerName: "Lisa",   prepDay: "Mi", sort: 1 },
+      c3:  { dishId: "d1", name: "Bratkartoffeln",   ownerName: "Thomas", prepDay: "Do", sort: 2 },
+      c4:  { dishId: "d2", name: "Lachs",            ownerName: "Maria",  prepDay: "Di", sort: 0 },
+      c5:  { dishId: "d2", name: "Senf-Dill-Sauce",  ownerName: "Lisa",   prepDay: "Mi", sort: 1 },
+      c6:  { dishId: "d3", name: "Pfanne",           ownerName: "",       prepDay: null, sort: 0 },
+    },
+    ingredients: {
+      i1:  { compId: "c1", name: "Rinderbraten",  amount: 2,   unit: "kg",  note: "",      sort: 0 },
+      i2:  { compId: "c1", name: "Salz",          amount: 30,  unit: "g",   note: "",      sort: 1 },
+      i3:  { compId: "c1", name: "Pfeffer",       amount: 10,  unit: "g",   note: "",      sort: 2 },
+      i4:  { compId: "c1", name: "Olivenöl",      amount: 50,  unit: "ml",  note: "",      sort: 3 },
+      i5:  { compId: "c2", name: "Mayonnaise",    amount: 500, unit: "g",   note: "",      sort: 0 },
+      i6:  { compId: "c2", name: "Cornichons",    amount: 200, unit: "g",   note: "",      sort: 1 },
+      i7:  { compId: "c2", name: "Kapern",        amount: 50,  unit: "g",   note: "",      sort: 2 },
+      i8:  { compId: "c3", name: "Kartoffeln",    amount: 3,   unit: "kg",  note: "",      sort: 0 },
+      i9:  { compId: "c3", name: "Butter",        amount: 200, unit: "g",   note: "",      sort: 1 },
+      i10: { compId: "c3", name: "Knoblauch",     amount: 100, unit: "g",   note: "",      sort: 2 },
+      i11: { compId: "c4", name: "Lachsfilet",    amount: 2,   unit: "kg",  note: "",      sort: 0 },
+      i12: { compId: "c4", name: "Salz",          amount: 100, unit: "g",   note: "",      sort: 1 },
+      i13: { compId: "c4", name: "Zucker",        amount: 80,  unit: "g",   note: "",      sort: 2 },
+      i14: { compId: "c4", name: "Dill",          amount: 1,   unit: "Stk", note: "Bund",  sort: 3 },
+      i15: { compId: "c5", name: "Senf",          amount: 200, unit: "g",   note: "",      sort: 0 },
+      i16: { compId: "c5", name: "Dill",          amount: 1,   unit: "Stk", note: "Bund",  sort: 1 },
+      i17: { compId: "c5", name: "Honig",         amount: 30,  unit: "ml",  note: "",      sort: 2 },
+      i18: { compId: "c5", name: "Zitronensaft",  amount: 20,  unit: "ml",  note: "",      sort: 3 },
+      i19: { compId: "c6", name: "Garnelen",      amount: 1.5, unit: "kg",  note: "TK",    sort: 0 },
+      i20: { compId: "c6", name: "Chili",         amount: 2,   unit: "Stk", note: "",      sort: 1 },
+    },
+    purchased: {}
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  STATE
+  // ═══════════════════════════════════════════════════════════════════════════
+  let state = { dishes: {}, components: {}, ingredients: {}, purchased: {} };
+  let db = null;
+
+  // ── Demo-Storage (localStorage) ───────────────────────────────────────────
+  const LS_KEY = "buffet-planer-v2";
+  function lsLoad() {
+    try { const r = localStorage.getItem(LS_KEY); return r ? JSON.parse(r) : null; } catch { return null; }
+  }
+  function lsSave() {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch {}
+  }
+
+  // ── Snackbar ──────────────────────────────────────────────────────────────
+  let snackTimer = null;
+  function snack(msg, undo = null) {
+    const el = document.getElementById("snackbar");
+    el.innerHTML = msg + (undo ? ` <button onclick="window._undoFn()">Rückgängig</button>` : "");
+    window._undoFn = undo;
+    el.classList.add("show");
+    clearTimeout(snackTimer);
+    snackTimer = setTimeout(() => el.classList.remove("show"), 5000);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  FIREBASE / DEMO ABSTRACTION
+  // ═══════════════════════════════════════════════════════════════════════════
+  function dbSet(path, val) {
+    if (DEMO_MODE) {
+      setPath(state, path, val);
+      lsSave();
+      render();
+      return Promise.resolve();
+    }
+    return set(ref(db, path), val);
+  }
+  function dbPush(path, val) {
+    if (DEMO_MODE) {
+      const id = "k" + Date.now() + Math.random().toString(36).slice(2, 6);
+      setPath(state, path + "/" + id, val);
+      lsSave();
+      render();
+      return Promise.resolve(id);
+    }
+    return push(ref(db, path), val).then(r => r.key);
+  }
+  function dbUpdate(path, val) {
+    if (DEMO_MODE) {
+      const cur = getPath(state, path) || {};
+      setPath(state, path, { ...cur, ...val });
+      lsSave();
+      render();
+      return Promise.resolve();
+    }
+    return update(ref(db, path), val);
+  }
+  function dbRemove(path) {
+    if (DEMO_MODE) {
+      removePath(state, path);
+      lsSave();
+      render();
+      return Promise.resolve();
+    }
+    return remove(ref(db, path));
+  }
+
+  function getPath(obj, path) {
+    return path.split("/").filter(Boolean).reduce((o, k) => o && o[k], obj);
+  }
+  function setPath(obj, path, val) {
+    const parts = path.split("/").filter(Boolean);
+    let cur = obj;
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (!cur[parts[i]]) cur[parts[i]] = {};
+      cur = cur[parts[i]];
+    }
+    cur[parts[parts.length - 1]] = val;
+  }
+  function removePath(obj, path) {
+    const parts = path.split("/").filter(Boolean);
+    let cur = obj;
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (!cur[parts[i]]) return;
+      cur = cur[parts[i]];
+    }
+    delete cur[parts[parts.length - 1]];
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  CRUD OPERATIONS
+  // ═══════════════════════════════════════════════════════════════════════════
+  function nextSort(collection) {
+    const items = Object.values(collection || {});
+    return items.length ? Math.max(...items.map(i => i.sort || 0)) + 1 : 0;
+  }
+
+  async function addDish(name) {
+    const sort = nextSort(state.dishes);
+    await dbPush("dishes", { name, sort });
+  }
+  async function updateDish(id, patch) { await dbUpdate(`dishes/${id}`, patch); }
+  async function deleteDish(id) {
+    // cascade components + ingredients
+    const comps = Object.entries(state.components || {}).filter(([, c]) => c.dishId === id);
+    for (const [cid] of comps) await deleteComponent(cid, true);
+    await dbRemove(`dishes/${id}`);
+  }
+
+  async function addComponent(dishId, name) {
+    const sort = nextSort(state.components);
+    await dbPush("components", { dishId, name, ownerName: "", prepDay: null, sort });
+  }
+  async function updateComponent(id, patch) { await dbUpdate(`components/${id}`, patch); }
+  async function deleteComponent(id, cascade = false) {
+    const ings = Object.entries(state.ingredients || {}).filter(([, i]) => i.compId === id);
+    for (const [iid] of ings) await dbRemove(`ingredients/${iid}`);
+    await dbRemove(`components/${id}`);
+  }
+
+  async function addIngredient(compId) {
+    const sort = nextSort(state.ingredients);
+    await dbPush("ingredients", { compId, name: "", amount: null, unit: "g", note: "", sort });
+  }
+  async function updateIngredient(id, patch) { await dbUpdate(`ingredients/${id}`, patch); }
+  async function deleteIngredient(id) {
+    const snap = state.ingredients[id];
+    await dbRemove(`ingredients/${id}`);
+    snack("Zutat gelöscht", async () => {
+      await dbSet(`ingredients/${id}`, snap);
+    });
+  }
+
+  async function togglePurchased(key) {
+    const cur = (state.purchased || {})[key] || {};
+    await dbUpdate(`purchased/${key}`, { bought: !cur.bought });
+  }
+  async function updateStock(key, stock) {
+    await dbUpdate(`purchased/${key}`, { stock: stock === "" ? null : parseFloat(stock) });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  DERIVED DATA
+  // ═══════════════════════════════════════════════════════════════════════════
+  function sortedDishes() {
+    return Object.entries(state.dishes || {})
+      .sort((a, b) => (a[1].sort || 0) - (b[1].sort || 0));
+  }
+  function componentsOfDish(dishId) {
+    return Object.entries(state.components || {})
+      .filter(([, c]) => c.dishId === dishId)
+      .sort((a, b) => (a[1].sort || 0) - (b[1].sort || 0));
+  }
+  function ingredientsOfComp(compId) {
+    return Object.entries(state.ingredients || {})
+      .filter(([, i]) => i.compId === compId)
+      .sort((a, b) => (a[1].sort || 0) - (b[1].sort || 0));
+  }
+
+  function shoppingList() {
+    const map = {};
+    for (const [, ing] of Object.entries(state.ingredients || {})) {
+      if (!ing.name) continue;
+      const key = ing.name.toLowerCase().trim() + "|" + (ing.unit || "");
+      if (!map[key]) map[key] = { name: ing.name, unit: ing.unit || "", total: 0, notes: [] };
+      map[key].total += parseFloat(ing.amount) || 0;
+      if (ing.note) map[key].notes.push(ing.note);
+    }
+    return Object.entries(map).sort((a, b) => a[1].name.localeCompare(b[1].name, "de"));
+  }
+
+  function productionData(filterDay = null, filterOwner = null) {
+    const days = ["Di", "Mi", "Do"];
+    const result = {};
+    for (const day of days) result[day] = [];
+
+    for (const [cid, comp] of Object.entries(state.components || {})) {
+      if (!comp.prepDay) continue;
+      if (filterDay && comp.prepDay !== filterDay) continue;
+      if (filterOwner && comp.ownerName !== filterOwner) continue;
+      const dish = state.dishes?.[comp.dishId];
+      const ings = ingredientsOfComp(cid);
+      result[comp.prepDay].push({ cid, comp, dish, ings });
+    }
+    return result;
+  }
+
+  function allOwners() {
+    const s = new Set();
+    for (const c of Object.values(state.components || {})) if (c.ownerName) s.add(c.ownerName);
+    return Array.from(s).sort();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  RENDER
+  // ═══════════════════════════════════════════════════════════════════════════
+  let activeTab = "plan";
+  let searchQuery = "";
+  let prodFilterDay = "";
+  let prodFilterOwner = "";
+  let confirmPending = null;
+
+  function render() {
+    document.getElementById("app").innerHTML = buildApp();
+    attachEvents();
+  }
+
+  const DAY_COLOR = { Di: "#3B82F6", Mi: "#059669", Do: "#D97706" };
+  const DAY_BG    = { Di: "#EFF6FF", Mi: "#ECFDF5", Do: "#FFFBEB" };
+
+  function buildApp() {
+    return `
+      <header>
+        <div class="header-inner">
+          <div class="logo">🍽️ <span>Buffet Planer</span></div>
+          ${DEMO_MODE ? `<div class="demo-badge">Demo-Modus · Daten lokal</div>` : `<div class="demo-badge live">🟢 Live · Firebase</div>`}
+        </div>
+        <nav class="tabs">
+          <button class="tab ${activeTab==='plan'?'active':''}" data-tab="plan">
+            <svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+            Plan
+          </button>
+          <button class="tab ${activeTab==='prod'?'active':''}" data-tab="prod">
+            <svg viewBox="0 0 24 24"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+            Produktion
+          </button>
+          <button class="tab ${activeTab==='shop'?'active':''}" data-tab="shop">
+            <svg viewBox="0 0 24 24"><path d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+            Einkauf
+          </button>
+        </nav>
+      </header>
+
+      <main>
+        ${activeTab === 'plan' ? buildPlan() : ''}
+        ${activeTab === 'prod' ? buildProduction() : ''}
+        ${activeTab === 'shop' ? buildShopping() : ''}
+      </main>
+
+      ${confirmPending ? buildConfirm() : ''}
+    `;
+  }
+
+  // ── Plan Tab ───────────────────────────────────────────────────────────────
+  function buildPlan() {
+    const dishes = sortedDishes();
+    const q = searchQuery.toLowerCase();
+
+    return `
+      <div class="plan-toolbar">
+        <div class="search-wrap">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          <input id="search" type="text" placeholder="Zutaten durchsuchen…" value="${escHtml(searchQuery)}">
+        </div>
+        <button class="btn-primary" id="add-dish">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          Gericht
+        </button>
+      </div>
+
+      <div class="board">
+        ${dishes.map(([did, dish]) => buildDishBlock(did, dish, q)).join('')}
+      </div>
+    `;
+  }
+
+  function buildDishBlock(did, dish, q) {
+    const comps = componentsOfDish(did);
+    return `
+      <div class="dish-block" data-did="${did}">
+        <div class="dish-header">
+          <svg class="chef-icon" viewBox="0 0 24 24"><path d="M12 2a4 4 0 014 4 4 4 0 01-1.16 2.77A6 6 0 0118 14v1H6v-1a6 6 0 013.16-5.23A4 4 0 018 6a4 4 0 014-4z"/><rect x="6" y="15" width="12" height="2" rx="1"/><rect x="8" y="17" width="8" height="3" rx="1"/></svg>
+          <input class="dish-name-input" data-did="${did}" value="${escHtml(dish.name)}" placeholder="Gerichtname">
+          <button class="icon-btn danger dish-delete" data-did="${did}" title="Gericht löschen">
+            <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>
+          </button>
+        </div>
+        <div class="components-row">
+          ${comps.map(([cid, comp]) => buildComponentCard(cid, comp, q)).join('')}
+          <div class="add-comp-col">
+            <button class="btn-add-comp" data-did="${did}">
+              <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+              Komponente
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function buildComponentCard(cid, comp, q) {
+    const ings = ingredientsOfComp(cid);
+    const filtered = q ? ings.filter(([, i]) => i.name.toLowerCase().includes(q)) : ings;
+    const highlight = q && filtered.length > 0;
+
+    return `
+      <div class="comp-card ${highlight ? 'highlighted' : ''}" data-cid="${cid}">
+        <div class="comp-header">
+          <input class="comp-name-input" data-cid="${cid}" value="${escHtml(comp.name)}" placeholder="Komponentenname">
+          <button class="icon-btn danger comp-delete" data-cid="${cid}" title="Komponente löschen">
+            <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>
+          </button>
+        </div>
+        <div class="comp-meta">
+          <input class="meta-input owner" data-cid="${cid}" placeholder="Verantwortlich" value="${escHtml(comp.ownerName || '')}">
+          <select class="meta-select day-select" data-cid="${cid}">
+            <option value="">— Tag —</option>
+            ${['Di','Mi','Do'].map(d => `<option value="${d}" ${comp.prepDay===d?'selected':''}>${d}</option>`).join('')}
+          </select>
+          ${comp.prepDay ? `<span class="day-badge" style="background:${DAY_COLOR[comp.prepDay]}">${comp.prepDay}</span>` : ''}
+        </div>
+        <div class="ing-list">
+          ${(q ? filtered : ings).map(([iid, ing]) => buildIngredientRow(iid, ing, q)).join('')}
+        </div>
+        <button class="btn-add-ing" data-cid="${cid}">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          Zutat
+        </button>
+      </div>
+    `;
+  }
+
+  function buildIngredientRow(iid, ing, q) {
+    const nameHl = q && ing.name.toLowerCase().includes(q)
+      ? ing.name.replace(new RegExp(q, 'gi'), m => `<mark>${m}</mark>`)
+      : escHtml(ing.name);
+    return `
+      <div class="ing-row" data-iid="${iid}">
+        <input class="ing-name" data-iid="${iid}" value="${escHtml(ing.name)}" placeholder="Zutatname">
+        <input class="ing-amount" data-iid="${iid}" type="number" value="${ing.amount ?? ''}" placeholder="Menge" min="0" step="any">
+        <select class="ing-unit" data-iid="${iid}">
+          ${['g','kg','ml','l','Stk'].map(u => `<option ${ing.unit===u?'selected':''}>${u}</option>`).join('')}
+        </select>
+        <input class="ing-note" data-iid="${iid}" value="${escHtml(ing.note || '')}" placeholder="Notiz">
+        <button class="icon-btn danger ing-delete" data-iid="${iid}">
+          <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>
+        </button>
+      </div>
+    `;
+  }
+
+  // ── Production Tab ─────────────────────────────────────────────────────────
+  function buildProduction() {
+    const owners = allOwners();
+    const data = productionData(prodFilterDay || null, prodFilterOwner || null);
+    return `
+      <div class="prod-filters">
+        <select id="filter-day">
+          <option value="">Alle Tage</option>
+          ${['Di','Mi','Do'].map(d => `<option ${prodFilterDay===d?'selected':''}>${d}</option>`).join('')}
+        </select>
+        <select id="filter-owner">
+          <option value="">Alle Personen</option>
+          ${owners.map(o => `<option ${prodFilterOwner===o?'selected':''}>${o}</option>`).join('')}
+        </select>
+        <button class="btn-print" onclick="window.print()">
+          <svg viewBox="0 0 24 24"><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+          Drucken
+        </button>
+      </div>
+      <div class="prod-board">
+        ${['Di','Mi','Do'].map(day => {
+          const items = data[day];
+          if (!items.length && (prodFilterDay && prodFilterDay !== day)) return '';
+          return `
+            <div class="prod-day-col">
+              <div class="prod-day-header" style="background:${DAY_COLOR[day]}">${day === 'Di' ? 'Dienstag' : day === 'Mi' ? 'Mittwoch' : 'Donnerstag'}</div>
+              <div class="prod-cards">
+                ${items.map(({ cid, comp, dish, ings }) => `
+                  <div class="prod-card" style="border-left: 3px solid ${DAY_COLOR[comp.prepDay]}">
+                    <div class="prod-card-head">
+                      <strong>${escHtml(comp.name)}</strong>
                       <span class="temp-badge ${comp.warm ? 'warm' : 'kalt'}">${comp.warm ? 'warm' : 'kalt'}</span>
                     </div>
                     <div class="prod-card-sub">${dish ? escHtml(dish.name) : ''} ${comp.ownerName ? '· ' + escHtml(comp.ownerName) : ''}</div>
